@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">VoxScribe</string>
+    <string name="nav_calls">Calls</string>
+    <string name="nav_record">Record</string>
+    <string name="nav_tags">Tags &amp; Cloud</string>
+    <string name="nav_compliance">Compliance</string>
+    <string name="hero_subtitle">AI Call Recorder, Compliance Alert &amp; Cloud Scribe</string>
+    <string name="search_calls_placeholder">Search transcripts, summaries, #tags, or contacts…</string>
+    <string name="start_call_recording">Start Call Recording</string>
+    <string name="privacy_compliance_title">Privacy &amp; Consent Verification</string>
+    <string name="play_audible_notice">Play Audible Notice (TTS)</string>
+    <string name="export_to_notion">Export to Notion</string>
+    <string name="export_to_evernote">Export to Evernote</string>
+    <string name="sync_to_cloud">Sync to Cloud Vault</string>
+    <string name="ai_summarize_call">Generate AI Summary &amp; Tags</string>
+</resources>
