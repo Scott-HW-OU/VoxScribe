@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,21 +19,35 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.CallMade
+import androidx.compose.material.icons.automirrored.filled.CallMissed
+import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PhoneCallback
+import androidx.compose.material.icons.filled.PhoneForwarded
+import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.SettingsPhone
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SpeakerPhone
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -49,14 +64,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -64,16 +77,25 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.auth.GoogleAccountProfile
 import com.example.data.local.ComplianceAndCloudSettings
 import com.example.data.local.SummaryFocusAspect
 import com.example.data.local.SummaryLengthOption
+import com.example.telephony.ActivePhoneCallInfo
+import com.example.telephony.CallAudioOutputRoute
+import com.example.telephony.SystemCallLogEntry
+import com.example.telephony.SystemCallPhase
 import com.example.ui.RecorderFormState
 import com.example.ui.theme.ComplianceAmber
 import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.EmeraldSynced
 import com.example.ui.theme.RecordingCrimson
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -81,35 +103,48 @@ fun CallRecorderScreen(
     formState: RecorderFormState,
     settings: ComplianceAndCloudSettings,
     googleAccount: GoogleAccountProfile,
+    activePhoneCallInfo: ActivePhoneCallInfo,
+    systemCallLog: List<SystemCallLogEntry>,
+    isDefaultDialer: Boolean,
+    isCallScreeningEnabled: Boolean,
+    hasPhonePermissions: Boolean,
+    hasMicPermission: Boolean,
     isRecording: Boolean,
     isPaused: Boolean,
     elapsedSeconds: Int,
     waveformAmplitudes: List<Float>,
+    activeAudioSourceLabel: String,
     isSpeakingNotice: Boolean,
-    isSimulatingCall: Boolean,
     partialSpeechText: String,
-    hasMicPermission: Boolean,
+    onRequestPhoneAndMicPermissions: () -> Unit,
+    onRequestDefaultDialerRole: () -> Unit,
+    onRequestCallScreeningRole: () -> Unit,
+    onRefreshTelephonyState: () -> Unit,
+    onDialAndRecordCall: (phoneNumber: String, contactName: String) -> Unit,
+    onAnswerIncomingCall: () -> Unit,
+    onEndActiveCall: () -> Unit,
+    onToggleCallHold: () -> Unit,
+    onToggleCallSpeakerphone: () -> Unit,
+    onToggleCallMute: () -> Unit,
+    onToggleAutoRecordOnCall: (Boolean) -> Unit,
+    onSelectCallLogEntry: (SystemCallLogEntry) -> Unit,
     onRequestMicPermissionAndRecord: () -> Unit,
     onUpdateContactName: (String) -> Unit,
     onUpdatePhoneNumber: (String) -> Unit,
     onUpdateCallDirection: (String) -> Unit,
-    onUpdateScenario: (String) -> Unit,
     onUpdateSummaryStyle: (String) -> Unit,
     onUpdateSummaryLength: (SummaryLengthOption) -> Unit,
     onToggleFocusAspect: (String) -> Unit,
     onUpdateLiveNotes: (String) -> Unit,
     onToggleLiveSpeechRecognition: () -> Unit,
-    onAddQuickUtterance: (speaker: String, text: String) -> Unit,
     onRefreshLiveAiInsight: () -> Unit,
     onPlayAudibleComplianceNotice: () -> Unit,
     onPauseResumeRecording: () -> Unit,
-    onStartSimulatedDialogue: () -> Unit,
     onStopAndTranscribe: () -> Unit,
+    onSelectAudioOutputRoute: (CallAudioOutputRoute) -> Unit,
+    onOpenDialerScreen: () -> Unit,
     onOpenGoogleAccountSheet: () -> Unit
 ) {
-    var quickSpeakerLine by remember { mutableStateOf("") }
-    var activeSpeakerToggle by remember { mutableStateOf("Speaker 2 (Caller)") }
-
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -158,7 +193,7 @@ fun CallRecorderScreen(
                             )
                             Text(
                                 text = if (googleAccount.isSignedIn && googleAccount.useAccountForGemini) {
-                                    "Using Google Gemini associated with ${googleAccount.displayName} (${googleAccount.associatedProjectId})"
+                                    "Using Google Gemini associated with ${googleAccount.displayName} (${googleAccount.email})"
                                 } else {
                                     "Tap to sign in with your Google Account to power AI transcription & summaries"
                                 },
@@ -182,7 +217,467 @@ fun CallRecorderScreen(
             }
         }
 
-        // 2. Live Waveform & Call Recording Studio Console
+        // 1.5. 3-Way Call Audio Output Switcher (Bluetooth / Phone Speaker / Loudspeaker)
+        item {
+            AudioOutputRouteSelectorCard(
+                activePhoneCallInfo = activePhoneCallInfo,
+                onSelectRoute = onSelectAudioOutputRoute,
+                onRefreshDevices = onRefreshTelephonyState
+            )
+        }
+
+        // 2. Android Phone Call System Connection & Live Line Monitor Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("telephony_system_card"),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            val phaseColor = when (activePhoneCallInfo.phase) {
+                                SystemCallPhase.ACTIVE_IN_CALL -> EmeraldSynced
+                                SystemCallPhase.RINGING, SystemCallPhase.DIALING -> ComplianceAmber
+                                SystemCallPhase.HOLDING -> ComplianceAmber
+                                else -> ElectricCyan
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(phaseColor.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SettingsPhone,
+                                    contentDescription = null,
+                                    tint = phaseColor
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Android Phone Call System Bridge",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = activePhoneCallInfo.phase.displayLabel +
+                                        if (activePhoneCallInfo.networkOperatorName.isNotBlank()) {
+                                            " • ${activePhoneCallInfo.networkOperatorName}"
+                                        } else {
+                                            ""
+                                        },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = phaseColor
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = onRefreshTelephonyState,
+                            modifier = Modifier.testTag("refresh_telephony_button")
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh Phone System")
+                        }
+                    }
+
+                    // Status Chips: Phone Permissions, InCallService Dialer Role, Call Screening Role, Audio Source
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        AssistChip(
+                            onClick = onRequestPhoneAndMicPermissions,
+                            label = {
+                                Text(
+                                    text = if (hasPhonePermissions && hasMicPermission) {
+                                        "Phone & Mic Permissions Granted"
+                                    } else {
+                                        "Grant Phone & Call Permissions"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (hasPhonePermissions && hasMicPermission) Icons.Default.Check else Icons.Default.Security,
+                                    contentDescription = null,
+                                    tint = if (hasPhonePermissions && hasMicPermission) EmeraldSynced else ComplianceAmber,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("grant_phone_permissions_chip")
+                        )
+
+                        AssistChip(
+                            onClick = onRequestDefaultDialerRole,
+                            label = {
+                                Text(
+                                    text = if (isDefaultDialer || activePhoneCallInfo.isInCallServiceBound) {
+                                        "InCallService Bound (Default Dialer)"
+                                    } else {
+                                        "Set as Default Phone Dialer"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.PhoneInTalk,
+                                    contentDescription = null,
+                                    tint = if (isDefaultDialer || activePhoneCallInfo.isInCallServiceBound) EmeraldSynced else ElectricCyan,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("set_default_dialer_chip")
+                        )
+
+                        AssistChip(
+                            onClick = onRequestCallScreeningRole,
+                            label = {
+                                Text(
+                                    text = if (isCallScreeningEnabled) {
+                                        "Caller ID Screening Active"
+                                    } else {
+                                        "Enable Caller ID Screening"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = null,
+                                    tint = if (isCallScreeningEnabled) EmeraldSynced else ElectricCyan,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("enable_call_screening_chip")
+                        )
+                    }
+
+                    // Auto-Record When Phone Call Connects Toggle
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Auto-Record When Phone Call Connects",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Automatically triggers compliance notice & starts recording on OFFHOOK / ACTIVE call state",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = formState.autoRecordOnPhoneCallActive,
+                            onCheckedChange = onToggleAutoRecordOnCall,
+                            modifier = Modifier.testTag("auto_record_call_switch")
+                        )
+                    }
+
+                    // Live Active or Ringing Call Control Banner (when a phone call is ringing, dialing, or connected)
+                    if (activePhoneCallInfo.phase != SystemCallPhase.IDLE &&
+                        activePhoneCallInfo.phase != SystemCallPhase.DISCONNECTED
+                    ) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = EmeraldSynced.copy(alpha = 0.14f)
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = activePhoneCallInfo.contactName.ifBlank {
+                                                activePhoneCallInfo.phoneNumber.ifBlank { "Active Phone Call" }
+                                            },
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = EmeraldSynced
+                                        )
+                                        Text(
+                                            text = "${activePhoneCallInfo.phoneNumber} • ${activePhoneCallInfo.callDirection} • ${activePhoneCallInfo.phase.displayLabel}",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+
+                                if (activePhoneCallInfo.phase == SystemCallPhase.RINGING) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Button(
+                                            onClick = onAnswerIncomingCall,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = EmeraldSynced,
+                                                contentColor = Color(0xFF042217)
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("answer_incoming_call_button")
+                                        ) {
+                                            Icon(Icons.Default.Call, contentDescription = null)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Answer & Record", fontWeight = FontWeight.Bold)
+                                        }
+                                        Button(
+                                            onClick = onEndActiveCall,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = RecordingCrimson,
+                                                contentColor = Color.White
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("decline_incoming_call_button")
+                                        ) {
+                                            Icon(Icons.Default.CallEnd, contentDescription = null)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Decline", fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                } else {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = activePhoneCallInfo.isSpeakerphoneOn,
+                                            onClick = onToggleCallSpeakerphone,
+                                            label = { Text("Speaker") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.SpeakerPhone,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        FilterChip(
+                                            selected = activePhoneCallInfo.isMicrophoneMuted,
+                                            onClick = onToggleCallMute,
+                                            label = { Text("Mute") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.MicOff,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (activePhoneCallInfo.isInCallServiceBound) {
+                                            FilterChip(
+                                                selected = activePhoneCallInfo.isOnHold,
+                                                onClick = onToggleCallHold,
+                                                label = { Text("Hold") },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        Icons.Default.Pause,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        Button(
+                                            onClick = onEndActiveCall,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = RecordingCrimson,
+                                                contentColor = Color.White
+                                            ),
+                                            modifier = Modifier.testTag("end_active_call_button")
+                                        ) {
+                                            Icon(Icons.Default.CallEnd, contentDescription = "End Call")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+
+                    // Outgoing Phone Dialer & Participant Inputs
+                    Text(
+                        text = "Place Outgoing Phone Call or Set Caller Info",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = ElectricCyan
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = formState.phoneNumber,
+                            onValueChange = onUpdatePhoneNumber,
+                            label = { Text("Phone Number") },
+                            placeholder = { Text("+1 (555) 019-2834") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .testTag("phone_number_input")
+                        )
+
+                        OutlinedTextField(
+                            value = formState.contactName,
+                            onValueChange = onUpdateContactName,
+                            label = { Text("Contact Name") },
+                            placeholder = { Text("Auto-filled from Contacts") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("contact_name_input")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf(
+                            "OUTGOING" to Icons.Default.PhoneForwarded,
+                            "INCOMING" to Icons.Default.PhoneCallback
+                        ).forEach { (dir, icon) ->
+                            FilterChip(
+                                selected = formState.callDirection == dir,
+                                onClick = { onUpdateCallDirection(dir) },
+                                label = { Text(dir) },
+                                leadingIcon = {
+                                    Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp))
+                                }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        OutlinedButton(
+                            onClick = onOpenDialerScreen,
+                            modifier = Modifier
+                                .height(44.dp)
+                                .testTag("open_keypad_dialer_button")
+                        ) {
+                            Text("Keypad")
+                        }
+
+                        Button(
+                            onClick = {
+                                onDialAndRecordCall(formState.phoneNumber, formState.contactName)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = ElectricCyan,
+                                contentColor = Color(0xFF140024)
+                            ),
+                            modifier = Modifier
+                                .height(44.dp)
+                                .testTag("dial_phone_call_button")
+                        ) {
+                            Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Dial Call", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Device Call Log Quick Selector (`CallLog.Calls`)
+                    if (systemCallLog.isNotEmpty()) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.History,
+                                contentDescription = null,
+                                tint = ElectricCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Recent Device Call Log (Tap to select caller):",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val timeFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+                            systemCallLog.forEach { entry ->
+                                AssistChip(
+                                    onClick = { onSelectCallLogEntry(entry) },
+                                    label = {
+                                        Text(
+                                            text = "${entry.cachedName} (${entry.phoneNumber}) • ${timeFmt.format(Date(entry.timestamp))}",
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        val icon = when (entry.callType) {
+                                            "OUTGOING" -> Icons.AutoMirrored.Filled.CallMade
+                                            "MISSED" -> Icons.AutoMirrored.Filled.CallMissed
+                                            else -> Icons.AutoMirrored.Filled.CallReceived
+                                        }
+                                        Icon(
+                                            icon,
+                                            contentDescription = entry.callType,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Live Waveform & Call Audio Recording Studio Console
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -219,7 +714,7 @@ fun CallRecorderScreen(
                                 )
                                 Text(
                                     text = if (isRecording) {
-                                        if (isPaused) "RECORDING PAUSED" else "LIVE CALL RECORDING"
+                                        if (isPaused) "PAUSED • $activeAudioSourceLabel" else "RECORDING • $activeAudioSourceLabel"
                                     } else {
                                         settings.jurisdictionDisplayName
                                     },
@@ -318,7 +813,7 @@ fun CallRecorderScreen(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (isSpeakingNotice) "Speaking…" else "Test TTS Alert")
+                                Text(if (isSpeakingNotice) "Speaking…" else "Play Consent Alert")
                             }
 
                             Button(
@@ -378,7 +873,7 @@ fun CallRecorderScreen(
             }
         }
 
-        // 3. Real-Time In-Call Transcription & On-The-Fly AI Analysis Card
+        // 4. Real-Time In-Call Transcription & On-The-Fly AI Analysis Card
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -398,7 +893,8 @@ fun CallRecorderScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.GraphicEq,
@@ -412,7 +908,7 @@ fun CallRecorderScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Live dialogue stream with on-the-fly Gemini takeaways & auto-tags",
+                                    text = "Streams live speech recognition & on-the-fly Gemini takeaways during calls",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -434,34 +930,23 @@ fun CallRecorderScreen(
                         }
                     }
 
-                    // Live STT & Simulated Multi-Speaker Call Controls
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
-                            onClick = onStartSimulatedDialogue,
-                            enabled = !isSimulatingCall,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("simulate_live_call_dialogue_button")
-                        ) {
-                            Icon(
-                                Icons.Default.RecordVoiceOver,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isSimulatingCall) "Speaking Live Call…" else "Play Live Call Dialogue",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        }
-
                         FilterChip(
                             selected = formState.liveSpeechRecognitionEnabled,
                             onClick = onToggleLiveSpeechRecognition,
-                            label = { Text("Mic Live STT") },
+                            label = {
+                                Text(
+                                    if (formState.liveSpeechRecognitionEnabled) {
+                                        "Live Speech-to-Text Active"
+                                    } else {
+                                        "Enable Live Speech-to-Text"
+                                    }
+                                )
+                            },
                             leadingIcon = {
                                 Icon(
                                     Icons.Default.Mic,
@@ -470,6 +955,19 @@ fun CallRecorderScreen(
                                 )
                             },
                             modifier = Modifier.testTag("toggle_live_stt_chip")
+                        )
+
+                        FilterChip(
+                            selected = activePhoneCallInfo.isSpeakerphoneOn,
+                            onClick = onToggleCallSpeakerphone,
+                            label = { Text("Speakerphone 2-Way Capture") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.SpeakerPhone,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         )
                     }
 
@@ -481,50 +979,12 @@ fun CallRecorderScreen(
                         )
                     }
 
-                    // Quick Live Utterance Adder
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        AssistChip(
-                            onClick = {
-                                activeSpeakerToggle = if (activeSpeakerToggle.startsWith("Speaker 1")) {
-                                    "Speaker 2 (${formState.contactName.substringBefore(" ")})"
-                                } else {
-                                    "Speaker 1 (You)"
-                                }
-                            },
-                            label = { Text(activeSpeakerToggle, style = MaterialTheme.typography.labelSmall) }
-                        )
-                        OutlinedTextField(
-                            value = quickSpeakerLine,
-                            onValueChange = { quickSpeakerLine = it },
-                            placeholder = { Text("Add live spoken line or note…") },
-                            singleLine = true,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("live_utterance_input")
-                        )
-                        IconButton(
-                            onClick = {
-                                if (quickSpeakerLine.isNotBlank()) {
-                                    onAddQuickUtterance(activeSpeakerToggle, quickSpeakerLine)
-                                    quickSpeakerLine = ""
-                                }
-                            },
-                            modifier = Modifier.testTag("add_live_utterance_button")
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Add Line", tint = ElectricCyan)
-                        }
-                    }
-
                     OutlinedTextField(
                         value = formState.liveTranscriptAndNotes,
                         onValueChange = onUpdateLiveNotes,
-                        label = { Text("Live Call Transcript Stream (Editable)") },
+                        label = { Text("Live Call Transcript & In-Call Notes") },
                         placeholder = {
-                            Text("Tap 'Play Live Call Dialogue', speak with Mic Live STT, or type live call notes…")
+                            Text("Spoken call dialogue appears here automatically during recording, or type live call notes…")
                         },
                         minLines = 4,
                         maxLines = 8,
@@ -648,7 +1108,7 @@ fun CallRecorderScreen(
             }
         }
 
-        // 4. Configurable AI Summarization Settings (Summary Length, Focus Aspects, Style)
+        // 5. Configurable AI Summarization Settings (Summary Length, Focus Aspects, Style)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -754,85 +1214,6 @@ fun CallRecorderScreen(
                                 selected = formState.summaryStyle == style,
                                 onClick = { onUpdateSummaryStyle(style) },
                                 label = { Text(style) }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 5. Call Participant & Dialogue Scenario Metadata
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                shape = RoundedCornerShape(18.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "Call Participant & Scenario Metadata",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    OutlinedTextField(
-                        value = formState.contactName,
-                        onValueChange = onUpdateContactName,
-                        label = { Text("Participant / Contact Name") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("contact_name_input")
-                    )
-
-                    OutlinedTextField(
-                        value = formState.phoneNumber,
-                        onValueChange = onUpdatePhoneNumber,
-                        label = { Text("Phone Number / Conference Bridge") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("phone_number_input")
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf("INCOMING", "OUTGOING", "CONFERENCE").forEach { dir ->
-                            FilterChip(
-                                selected = formState.callDirection == dir,
-                                onClick = { onUpdateCallDirection(dir) },
-                                label = { Text(dir) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-                    Text(
-                        text = "Simulated Call Dialogue Topic (for TTS testing):",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(
-                            "Sales & Contract Renewal",
-                            "Product Roadmap & Engineering",
-                            "Client Onboarding & Budget"
-                        ).forEach { topic ->
-                            FilterChip(
-                                selected = formState.selectedScenario == topic,
-                                onClick = { onUpdateScenario(topic) },
-                                label = { Text(topic) }
                             )
                         }
                     }

@@ -224,7 +224,7 @@ class GeminiCallAiService {
             }.ifEmpty { listOf("Action Items", "Decisions Made", "Important Dates") }
 
             val accountContextLine = if (googleProfile != null && googleProfile.isSignedIn && googleProfile.useAccountForGemini) {
-                "- Signed-In Google Account User (Speaker 1): ${googleProfile.displayName} <${googleProfile.email}> (Google Cloud Project: ${googleProfile.associatedProjectId})"
+                "- Signed-In Google Account User (Speaker 1): ${googleProfile.displayName} <${googleProfile.email}>"
             } else {
                 "- Speaker 1: App User"
             }

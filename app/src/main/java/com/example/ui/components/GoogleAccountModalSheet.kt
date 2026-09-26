@@ -15,16 +15,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -40,6 +41,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,6 +55,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.auth.GoogleAccountProfile
 import com.example.ui.theme.ComplianceAmber
@@ -81,19 +85,19 @@ fun GoogleAccountModalSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var emailInput by remember(account.email) {
-        mutableStateOf(account.email.ifBlank { "scott.harveywhittle@ou.ac.uk" })
+        mutableStateOf(account.email)
     }
     var displayNameInput by remember(account.displayName) {
-        mutableStateOf(account.displayName.ifBlank { "Scott Harvey-Whittle" })
+        mutableStateOf(account.displayName)
     }
-    var oauthTokenInput by remember(account.oauthAccessToken) {
-        mutableStateOf(account.oauthAccessToken.orEmpty())
+    var passwordOrTokenInput by remember {
+        mutableStateOf("")
     }
-    var projectIdInput by remember(account.associatedProjectId) {
-        mutableStateOf(account.associatedProjectId.ifBlank { GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID })
+    var showAdvancedTokenField by remember {
+        mutableStateOf(false)
     }
-    var accountApiKeyInput by remember(account.accountGeminiApiKey) {
-        mutableStateOf(account.accountGeminiApiKey)
+    var personalGeminiKeyInput by remember(account.accountGeminiApiKey) {
+        mutableStateOf("")
     }
 
     ModalBottomSheet(
@@ -119,18 +123,18 @@ fun GoogleAccountModalSheet(
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = "Google Gemini Account",
+                        contentDescription = "Google Sign-In",
                         tint = ElectricCyan,
                         modifier = Modifier.size(26.dp)
                     )
                     Column {
                         Text(
-                            text = "Google Account & Gemini AI",
+                            text = "Sign in with Google",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Sign in to power call transcription & summaries with your Google Gemini",
+                            text = "Use your personal Google Account for Gemini AI transcription & summaries",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -144,7 +148,7 @@ fun GoogleAccountModalSheet(
                 }
             }
 
-            // Current Status Card
+            // Current Signed-In User Profile Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -190,7 +194,7 @@ fun GoogleAccountModalSheet(
                                 text = initials,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF061522)
+                                color = Color(0xFF0A0514)
                             )
                         }
 
@@ -217,16 +221,18 @@ fun GoogleAccountModalSheet(
                                 text = if (account.isSignedIn) {
                                     account.email
                                 } else {
-                                    "Sign in with Google to use your account's Gemini AI"
+                                    "Sign in with your Google Account below"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Text(
-                                text = "Mode: ${account.authModeLabel}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (account.isSignedIn) ElectricCyan else ComplianceAmber
-                            )
+                            if (account.isSignedIn) {
+                                Text(
+                                    text = "Google Gemini Active for ${account.email}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = EmeraldSynced
+                                )
+                            }
                         }
                     }
 
@@ -239,12 +245,12 @@ fun GoogleAccountModalSheet(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Use Google Gemini Associated with Account",
+                                    text = "Use My Google Account for Gemini AI",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = "Routes live transcription, summaries, and Q&A through ${account.email} (${account.associatedProjectId})",
+                                    text = "Powers real-time transcription, custom call summaries, and Q&A with your signed-in Google Account (${account.email})",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -260,7 +266,7 @@ fun GoogleAccountModalSheet(
                 }
             }
 
-            // Primary Google Sign-In via Credential Manager + Play Services OAuth2
+            // 1. One-Tap Android Google Sign-In
             Button(
                 onClick = onSignInWithCredentialManager,
                 enabled = !isSigningIn,
@@ -270,7 +276,7 @@ fun GoogleAccountModalSheet(
                     .testTag("google_credential_sign_in_button"),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = ElectricCyan,
-                    contentColor = Color(0xFF00262D)
+                    contentColor = Color(0xFF140024)
                 ),
                 shape = RoundedCornerShape(14.dp)
             ) {
@@ -278,18 +284,18 @@ fun GoogleAccountModalSheet(
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
-                        color = Color(0xFF00262D)
+                        color = Color(0xFF140024)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("Connecting to Google Account…", fontWeight = FontWeight.Bold)
+                    Text("Signing in with Google…", fontWeight = FontWeight.Bold)
                 } else {
                     Icon(Icons.Default.AccountCircle, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (account.isSignedIn) {
-                            "Switch / Re-Authorize Google Account (OAuth2)"
+                            "Switch Google Account on Device"
                         } else {
-                            "Sign in with Google (Credential Manager)"
+                            "Continue with Google Account"
                         },
                         fontWeight = FontWeight.Bold
                     )
@@ -326,7 +332,7 @@ fun GoogleAccountModalSheet(
                 }
             }
 
-            // Direct Google Account & Associated Gemini Project Linker (also works in browser emulators)
+            // 2. Direct Personal Google Account Login Form
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -343,19 +349,19 @@ fun GoogleAccountModalSheet(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.VerifiedUser,
+                            imageVector = Icons.Default.Person,
                             contentDescription = null,
-                            tint = ElectricCyan,
+                            tint = EmeraldSynced,
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = "Direct Google Account & Gemini Project Link",
+                            text = "Sign in with Your Google Account Login",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Text(
-                        text = "Link your Google Account email, provisioned Cloud Project, and optional OAuth2 Bearer Token or Gemini credential directly:",
+                        text = "Enter your personal Google email and name to sign in and associate your Google Gemini AI with your call recordings:",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -363,8 +369,10 @@ fun GoogleAccountModalSheet(
                     OutlinedTextField(
                         value = emailInput,
                         onValueChange = { emailInput = it },
-                        label = { Text("Google Account Email") },
+                        label = { Text("Your Google Email Address") },
+                        placeholder = { Text("you@gmail.com") },
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("google_email_input")
@@ -373,7 +381,8 @@ fun GoogleAccountModalSheet(
                     OutlinedTextField(
                         value = displayNameInput,
                         onValueChange = { displayNameInput = it },
-                        label = { Text("Account Display Name") },
+                        label = { Text("Your Name (Optional)") },
+                        placeholder = { Text("Your Full Name") },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -381,61 +390,73 @@ fun GoogleAccountModalSheet(
                     )
 
                     OutlinedTextField(
-                        value = projectIdInput,
-                        onValueChange = { projectIdInput = it },
-                        label = { Text("Associated Google Cloud / Gemini Project ID") },
+                        value = passwordOrTokenInput,
+                        onValueChange = { passwordOrTokenInput = it },
+                        label = { Text("Password / Google Passkey (Optional)") },
+                        placeholder = { Text("Enter your Google login password") },
                         singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("google_project_input")
+                            .testTag("google_password_input")
                     )
 
-                    OutlinedTextField(
-                        value = oauthTokenInput,
-                        onValueChange = { oauthTokenInput = it },
-                        label = { Text("OAuth2 Access Token (Optional Bearer Token)") },
-                        placeholder = { Text("ya29.a0...") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("google_oauth_token_input")
-                    )
+                    TextButton(
+                        onClick = { showAdvancedTokenField = !showAdvancedTokenField }
+                    ) {
+                        Text(
+                            text = if (showAdvancedTokenField) {
+                                "Hide Personal Gemini Key (Optional)"
+                            } else {
+                                "Have a Personal Gemini Key or OAuth Token? (Optional)"
+                            },
+                            color = ElectricCyan
+                        )
+                    }
 
-                    OutlinedTextField(
-                        value = accountApiKeyInput,
-                        onValueChange = { accountApiKeyInput = it },
-                        label = { Text("Account Gemini Key (Defaults to provisioned project)") },
-                        placeholder = { Text("Leave blank to use provisioned Google project Gemini") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("google_gemini_key_input")
-                    )
+                    if (showAdvancedTokenField) {
+                        OutlinedTextField(
+                            value = personalGeminiKeyInput,
+                            onValueChange = { personalGeminiKeyInput = it },
+                            label = { Text("Personal Google Gemini Key (Optional)") },
+                            placeholder = { Text("Optional personal Gemini API key") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("google_gemini_key_input")
+                        )
+                    }
 
                     Button(
                         onClick = {
                             onSignInWithLinkedAccount(
                                 emailInput,
                                 displayNameInput,
-                                oauthTokenInput,
-                                projectIdInput,
-                                accountApiKeyInput
+                                "",
+                                "",
+                                personalGeminiKeyInput
                             )
                         },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldSynced,
+                            contentColor = Color(0xFF00210B)
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .height(48.dp)
                             .testTag("link_google_account_button"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = if (account.isSignedIn) {
-                                "Update Linked Google Account & Gemini Settings"
+                                "Update My Google Account Login"
                             } else {
-                                "Sign In & Activate Account Gemini AI"
+                                "Sign In with Google Account"
                             },
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }

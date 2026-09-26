@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
@@ -88,6 +89,7 @@ fun CallFeedScreen(
     onToggleStarredFilter: () -> Unit,
     onOpenCallDetail: (Long) -> Unit,
     onToggleStarCall: (CallRecordingEntity) -> Unit,
+    onNavigateToDialer: () -> Unit,
     onNavigateToRecorder: () -> Unit,
     onOpenGoogleAccountSheet: () -> Unit
 ) {
@@ -122,8 +124,8 @@ fun CallFeedScreen(
                             .background(
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        Color(0x8809111E),
-                                        Color(0xEB09111E)
+                                        Color(0x88120524),
+                                        Color(0xEB0A0614)
                                     )
                                 )
                             )
@@ -211,10 +213,30 @@ fun CallFeedScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Button(
+                                    onClick = onNavigateToDialer,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = EmeraldSynced,
+                                        contentColor = Color(0xFF00210B)
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .height(36.dp)
+                                        .testTag("hero_dialer_button")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Dialpad,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Keypad Dialer", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
                                     onClick = onNavigateToRecorder,
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = RecordingCrimson,
-                                        contentColor = Color.White
+                                        containerColor = ElectricCyan,
+                                        contentColor = Color(0xFF140024)
                                     ),
                                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                                     modifier = Modifier
@@ -227,22 +249,7 @@ fun CallFeedScreen(
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Record Call", style = MaterialTheme.typography.labelLarge)
-                                }
-
-                                if (!googleAccount.isSignedIn) {
-                                    AssistChip(
-                                        onClick = onOpenGoogleAccountSheet,
-                                        label = { Text("Connect Google Account") },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.Default.AccountCircle,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        },
-                                        modifier = Modifier.height(36.dp)
-                                    )
+                                    Text("Record Call", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -349,13 +356,30 @@ fun CallFeedScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Button(
-                            onClick = onNavigateToRecorder,
-                            modifier = Modifier.testTag("empty_state_record_button")
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open Call Recorder Studio")
+                            Button(
+                                onClick = onNavigateToDialer,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = EmeraldSynced,
+                                    contentColor = Color(0xFF00210B)
+                                ),
+                                modifier = Modifier.testTag("empty_state_dialer_button")
+                            ) {
+                                Icon(Icons.Default.Dialpad, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Open Keypad Dialer", fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = onNavigateToRecorder,
+                                modifier = Modifier.testTag("empty_state_record_button")
+                            ) {
+                                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Call Recorder", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

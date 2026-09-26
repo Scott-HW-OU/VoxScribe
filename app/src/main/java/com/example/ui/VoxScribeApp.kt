@@ -2,6 +2,7 @@ package com.example.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,7 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,13 +20,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhoneInTalk
@@ -70,14 +70,16 @@ import com.example.ui.screens.CallDetailScreen
 import com.example.ui.screens.CallFeedScreen
 import com.example.ui.screens.CallRecorderScreen
 import com.example.ui.screens.ComplianceAndSettingsScreen
+import com.example.ui.screens.DialerScreen
 import com.example.ui.screens.TagsAndCloudScreen
 import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.EmeraldSynced
-import com.example.ui.theme.RecordingCrimson
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoxScribeApp(
+    initialDialNumber: String? = null,
+    openRecorderInitially: Boolean = false,
     viewModel: VoxScribeViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -95,6 +97,11 @@ fun VoxScribeApp(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val exportConfig by viewModel.exportConfig.collectAsStateWithLifecycle()
 
+    val activePhoneCallInfo by viewModel.activePhoneCallInfo.collectAsStateWithLifecycle()
+    val systemCallLog by viewModel.systemCallLog.collectAsStateWithLifecycle()
+    val isDefaultDialer by viewModel.isDefaultDialer.collectAsStateWithLifecycle()
+    val isCallScreeningEnabled by viewModel.isCallScreeningEnabled.collectAsStateWithLifecycle()
+
     val googleAccount by viewModel.googleAccount.collectAsStateWithLifecycle()
     val showGoogleAccountSheet by viewModel.showGoogleAccountSheet.collectAsStateWithLifecycle()
     val isGoogleSigningIn by viewModel.isGoogleSigningIn.collectAsStateWithLifecycle()
@@ -105,6 +112,7 @@ fun VoxScribeApp(
     val isPaused by viewModel.audioRecorder.isPaused.collectAsStateWithLifecycle()
     val elapsedSeconds by viewModel.audioRecorder.elapsedSeconds.collectAsStateWithLifecycle()
     val waveformAmplitudes by viewModel.audioRecorder.waveformAmplitudes.collectAsStateWithLifecycle()
+    val activeAudioSourceLabel by viewModel.audioRecorder.activeAudioSourceLabel.collectAsStateWithLifecycle()
 
     val isPlayingAudio by viewModel.audioPlayer.isPlaying.collectAsStateWithLifecycle()
     val audioPositionMs by viewModel.audioPlayer.currentPositionMs.collectAsStateWithLifecycle()
@@ -112,7 +120,6 @@ fun VoxScribeApp(
     val playbackSpeed by viewModel.audioPlayer.playbackSpeed.collectAsStateWithLifecycle()
 
     val isSpeakingNotice by viewModel.ttsAnnouncer.isSpeakingNotice.collectAsStateWithLifecycle()
-    val isSimulatingCall by viewModel.ttsAnnouncer.isSimulatingCall.collectAsStateWithLifecycle()
     val partialSpeechText by viewModel.liveSpeechTranscriber.partialSpeech.collectAsStateWithLifecycle()
 
     val isRegeneratingSummary by viewModel.isRegeneratingSummary.collectAsStateWithLifecycle()
@@ -123,6 +130,15 @@ fun VoxScribeApp(
     val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
     val pendingShareIntent by viewModel.pendingShareIntent.collectAsStateWithLifecycle()
 
+    LaunchedEffect(initialDialNumber, openRecorderInitially) {
+        if (!initialDialNumber.isNullOrBlank()) {
+            viewModel.updatePhoneNumber(initialDialNumber)
+            viewModel.selectTab(AppTab.DIALER)
+        } else if (openRecorderInitially) {
+            viewModel.selectTab(AppTab.RECORD)
+        }
+    }
+
     var hasMicPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -132,11 +148,53 @@ fun VoxScribeApp(
         )
     }
 
+    var hasPhonePermissions by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_PHONE_STATE
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasMicPermission = granted
         viewModel.requestStartCallRecording()
+    }
+
+    val phoneAndMicPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        hasMicPermission = grants[Manifest.permission.RECORD_AUDIO] == true ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        hasPhonePermissions = grants[Manifest.permission.READ_PHONE_STATE] == true ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        viewModel.refreshTelephonyBindingsAndCallLog()
+    }
+
+    val requestAllTelephonyAndAudioPermissions: () -> Unit = {
+        val perms = buildList {
+            add(Manifest.permission.RECORD_AUDIO)
+            add(Manifest.permission.READ_PHONE_STATE)
+            add(Manifest.permission.CALL_PHONE)
+            add(Manifest.permission.READ_CALL_LOG)
+            add(Manifest.permission.READ_CONTACTS)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                add(Manifest.permission.ANSWER_PHONE_CALLS)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }.toTypedArray()
+        phoneAndMicPermissionsLauncher.launch(perms)
+    }
+
+    val roleRequestLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.refreshTelephonyBindingsAndCallLog()
     }
 
     val oauthConsentLauncher = rememberLauncherForActivityResult(
@@ -188,18 +246,19 @@ fun VoxScribeApp(
                             Icon(
                                 imageVector = Icons.Default.PhoneInTalk,
                                 contentDescription = null,
-                                tint = ElectricCyan,
+                                tint = EmeraldSynced,
                                 modifier = Modifier.size(22.dp)
                             )
                             Text(
                                 text = "VoxScribe",
                                 style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.ExtraBold
+                                fontWeight = FontWeight.ExtraBold,
+                                color = ElectricCyan
                             )
                         }
                     },
                     actions = {
-                        // Google Account Sign-In & Associated Gemini Pill in TopAppBar
+                        // Personal Google Account Sign-In Pill in TopAppBar
                         Surface(
                             color = if (googleAccount.isSignedIn) {
                                 EmeraldSynced.copy(alpha = 0.18f)
@@ -229,7 +288,7 @@ fun VoxScribeApp(
                                             text = googleAccount.displayName.firstOrNull()?.uppercase() ?: "G",
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF042217)
+                                            color = Color(0xFF00210B)
                                         )
                                     }
                                     Text(
@@ -247,7 +306,7 @@ fun VoxScribeApp(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Text(
-                                        text = "Google Sign-In",
+                                        text = "Sign In",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = ElectricCyan
                                     )
@@ -269,12 +328,12 @@ fun VoxScribeApp(
             floatingActionButton = {
                 if (selectedRecording == null && currentTab == AppTab.CALLS) {
                     FloatingActionButton(
-                        onClick = { viewModel.selectTab(AppTab.RECORD) },
-                        containerColor = RecordingCrimson,
-                        contentColor = Color.White,
-                        modifier = Modifier.testTag("fab_record_call")
+                        onClick = { viewModel.selectTab(AppTab.DIALER) },
+                        containerColor = EmeraldSynced,
+                        contentColor = Color(0xFF00210B),
+                        modifier = Modifier.testTag("fab_open_dialer")
                     ) {
-                        Icon(Icons.Default.Mic, contentDescription = "Record New Call")
+                        Icon(Icons.Default.Dialpad, contentDescription = "Open Phone Dialer")
                     }
                 }
             },
@@ -291,6 +350,13 @@ fun VoxScribeApp(
                             modifier = Modifier.testTag("nav_tab_calls")
                         )
                         NavigationBarItem(
+                            selected = currentTab == AppTab.DIALER,
+                            onClick = { viewModel.selectTab(AppTab.DIALER) },
+                            icon = { Icon(Icons.Default.Dialpad, contentDescription = "Dialer") },
+                            label = { Text("Dialer") },
+                            modifier = Modifier.testTag("nav_tab_dialer")
+                        )
+                        NavigationBarItem(
                             selected = currentTab == AppTab.RECORD,
                             onClick = { viewModel.selectTab(AppTab.RECORD) },
                             icon = { Icon(Icons.Default.Mic, contentDescription = "Record") },
@@ -300,8 +366,8 @@ fun VoxScribeApp(
                         NavigationBarItem(
                             selected = currentTab == AppTab.TAGS_CLOUD,
                             onClick = { viewModel.selectTab(AppTab.TAGS_CLOUD) },
-                            icon = { Icon(Icons.Default.CloudSync, contentDescription = "Tags & Cloud") },
-                            label = { Text("Tags & Cloud") },
+                            icon = { Icon(Icons.Default.CloudSync, contentDescription = "Cloud") },
+                            label = { Text("Cloud") },
                             modifier = Modifier.testTag("nav_tab_tags_cloud")
                         )
                         NavigationBarItem(
@@ -334,6 +400,15 @@ fun VoxScribeApp(
                             },
                             icon = { Icon(Icons.Default.PhoneInTalk, contentDescription = "Calls") },
                             label = { Text("Calls") }
+                        )
+                        NavigationRailItem(
+                            selected = currentTab == AppTab.DIALER,
+                            onClick = {
+                                viewModel.closeCallDetail()
+                                viewModel.selectTab(AppTab.DIALER)
+                            },
+                            icon = { Icon(Icons.Default.Dialpad, contentDescription = "Dialer") },
+                            label = { Text("Dialer") }
                         )
                         NavigationRailItem(
                             selected = currentTab == AppTab.RECORD,
@@ -415,22 +490,97 @@ fun VoxScribeApp(
                                 onToggleStarredFilter = viewModel::toggleStarredFilter,
                                 onOpenCallDetail = viewModel::openCallDetail,
                                 onToggleStarCall = viewModel::toggleStarred,
+                                onNavigateToDialer = { viewModel.selectTab(AppTab.DIALER) },
                                 onNavigateToRecorder = { viewModel.selectTab(AppTab.RECORD) },
                                 onOpenGoogleAccountSheet = { viewModel.setShowGoogleAccountSheet(true) }
+                            )
+
+                            AppTab.DIALER -> DialerScreen(
+                                phoneNumber = recorderForm.phoneNumber,
+                                contactName = recorderForm.contactName,
+                                autoRecordOnCall = recorderForm.autoRecordOnPhoneCallActive,
+                                activePhoneCallInfo = activePhoneCallInfo,
+                                systemCallLog = systemCallLog,
+                                isDefaultDialer = isDefaultDialer,
+                                isCallScreeningEnabled = isCallScreeningEnabled,
+                                hasPhonePermissions = hasPhonePermissions,
+                                isRecording = isRecording,
+                                onKeypadDigitPressed = viewModel::pressKeypadDigit,
+                                onBackspacePressed = viewModel::backspaceDialerNumber,
+                                onClearNumberPressed = viewModel::clearDialerNumber,
+                                onAppendPlusSign = viewModel::appendDialerPlusSign,
+                                onUpdatePhoneNumber = viewModel::updatePhoneNumber,
+                                onUpdateContactName = viewModel::updateContactName,
+                                onSelectAudioOutputRoute = viewModel::selectCallAudioOutputRoute,
+                                onToggleAutoRecordOnCall = viewModel::toggleAutoRecordOnPhoneCall,
+                                onDialOnly = {
+                                    viewModel.dialAndRecordPhoneCall(
+                                        recorderForm.phoneNumber,
+                                        recorderForm.contactName
+                                    )
+                                },
+                                onDialAndRecord = viewModel::dialAndAutoRecordFromDialer,
+                                onAnswerIncomingCall = viewModel::answerIncomingSystemCall,
+                                onEndActiveCall = viewModel::endActiveSystemCall,
+                                onToggleCallHold = viewModel::toggleCallHold,
+                                onToggleCallMute = viewModel::toggleCallMute,
+                                onSelectCallLogEntry = viewModel::selectSystemCallLogEntry,
+                                onRequestPhoneAndBluetoothPermissions = requestAllTelephonyAndAudioPermissions,
+                                onRequestDefaultDialerRole = {
+                                    val intent = viewModel.getRequestDefaultDialerIntent()
+                                    if (intent != null) {
+                                        runCatching { roleRequestLauncher.launch(intent) }
+                                    }
+                                },
+                                onRequestCallScreeningRole = {
+                                    val intent = viewModel.getRequestCallScreeningIntent()
+                                    if (intent != null) {
+                                        runCatching { roleRequestLauncher.launch(intent) }
+                                    }
+                                },
+                                onRefreshTelephonyState = viewModel::refreshTelephonyBindingsAndCallLog,
+                                onNavigateToRecorderStudio = { viewModel.selectTab(AppTab.RECORD) }
                             )
 
                             AppTab.RECORD -> CallRecorderScreen(
                                 formState = recorderForm,
                                 settings = settings,
                                 googleAccount = googleAccount,
+                                activePhoneCallInfo = activePhoneCallInfo,
+                                systemCallLog = systemCallLog,
+                                isDefaultDialer = isDefaultDialer,
+                                isCallScreeningEnabled = isCallScreeningEnabled,
+                                hasPhonePermissions = hasPhonePermissions,
+                                hasMicPermission = hasMicPermission,
                                 isRecording = isRecording,
                                 isPaused = isPaused,
                                 elapsedSeconds = elapsedSeconds,
                                 waveformAmplitudes = waveformAmplitudes,
+                                activeAudioSourceLabel = activeAudioSourceLabel,
                                 isSpeakingNotice = isSpeakingNotice,
-                                isSimulatingCall = isSimulatingCall,
                                 partialSpeechText = partialSpeechText,
-                                hasMicPermission = hasMicPermission,
+                                onRequestPhoneAndMicPermissions = requestAllTelephonyAndAudioPermissions,
+                                onRequestDefaultDialerRole = {
+                                    val intent = viewModel.getRequestDefaultDialerIntent()
+                                    if (intent != null) {
+                                        runCatching { roleRequestLauncher.launch(intent) }
+                                    }
+                                },
+                                onRequestCallScreeningRole = {
+                                    val intent = viewModel.getRequestCallScreeningIntent()
+                                    if (intent != null) {
+                                        runCatching { roleRequestLauncher.launch(intent) }
+                                    }
+                                },
+                                onRefreshTelephonyState = viewModel::refreshTelephonyBindingsAndCallLog,
+                                onDialAndRecordCall = viewModel::dialAndRecordPhoneCall,
+                                onAnswerIncomingCall = viewModel::answerIncomingSystemCall,
+                                onEndActiveCall = viewModel::endActiveSystemCall,
+                                onToggleCallHold = viewModel::toggleCallHold,
+                                onToggleCallSpeakerphone = viewModel::toggleCallSpeakerphone,
+                                onToggleCallMute = viewModel::toggleCallMute,
+                                onToggleAutoRecordOnCall = viewModel::toggleAutoRecordOnPhoneCall,
+                                onSelectCallLogEntry = viewModel::selectSystemCallLogEntry,
                                 onRequestMicPermissionAndRecord = {
                                     if (hasMicPermission) {
                                         viewModel.requestStartCallRecording()
@@ -441,13 +591,11 @@ fun VoxScribeApp(
                                 onUpdateContactName = viewModel::updateContactName,
                                 onUpdatePhoneNumber = viewModel::updatePhoneNumber,
                                 onUpdateCallDirection = viewModel::updateCallDirection,
-                                onUpdateScenario = viewModel::updateSelectedScenario,
                                 onUpdateSummaryStyle = viewModel::updateRecorderSummaryStyle,
                                 onUpdateSummaryLength = viewModel::updateRecorderSummaryLength,
                                 onToggleFocusAspect = viewModel::toggleRecorderFocusAspect,
                                 onUpdateLiveNotes = viewModel::updateLiveTranscriptNotes,
                                 onToggleLiveSpeechRecognition = viewModel::toggleLiveSpeechRecognition,
-                                onAddQuickUtterance = viewModel::addQuickLiveCallerUtterance,
                                 onRefreshLiveAiInsight = viewModel::triggerLiveInCallAiUpdate,
                                 onPlayAudibleComplianceNotice = { viewModel.playComplianceNoticeNow() },
                                 onPauseResumeRecording = {
@@ -457,8 +605,9 @@ fun VoxScribeApp(
                                         viewModel.audioRecorder.pauseRecording()
                                     }
                                 },
-                                onStartSimulatedDialogue = viewModel::startSimulatedCallConversation,
                                 onStopAndTranscribe = viewModel::stopRecordingAndTranscribe,
+                                onSelectAudioOutputRoute = viewModel::selectCallAudioOutputRoute,
+                                onOpenDialerScreen = { viewModel.selectTab(AppTab.DIALER) },
                                 onOpenGoogleAccountSheet = { viewModel.setShowGoogleAccountSheet(true) }
                             )
 
@@ -500,7 +649,9 @@ fun VoxScribeApp(
         if (recorderForm.showConsentDialog) {
             ConsentVerificationDialog(
                 settings = settings,
-                contactName = recorderForm.contactName,
+                contactName = recorderForm.contactName.ifBlank {
+                    recorderForm.phoneNumber.ifBlank { "Call Participant" }
+                },
                 isSpeakingNotice = isSpeakingNotice,
                 hasPlayedAudibleAlert = recorderForm.hasPlayedAudibleAlertForSession,
                 partyConsentConfirmed = recorderForm.partyConsentConfirmed,
@@ -511,7 +662,7 @@ fun VoxScribeApp(
             )
         }
 
-        // Google Account Sign-In & Associated Gemini AI Modal Sheet
+        // Personal Google Account Sign-In & Associated Gemini AI Modal Sheet
         if (showGoogleAccountSheet) {
             GoogleAccountModalSheet(
                 account = googleAccount,

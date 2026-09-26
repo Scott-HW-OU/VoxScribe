@@ -10,25 +10,25 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 private val DarkColorScheme = darkColorScheme(
-    primary = ElectricCyan,
-    onPrimary = OnElectricCyan,
-    primaryContainer = ElectricCyanContainer,
-    onPrimaryContainer = OnElectricCyanContainer,
-    secondary = ComplianceAmber,
-    onSecondary = OnComplianceAmber,
-    secondaryContainer = ComplianceAmberContainer,
-    onSecondaryContainer = OnComplianceAmberContainer,
+    primary = NeonPurple,
+    onPrimary = OnNeonPurple,
+    primaryContainer = NeonPurpleContainer,
+    onPrimaryContainer = OnNeonPurpleContainer,
+    secondary = NeonGreen,
+    onSecondary = OnNeonGreen,
+    secondaryContainer = NeonGreenContainer,
+    onSecondaryContainer = OnNeonGreenContainer,
     tertiary = RecordingCrimson,
     onTertiary = OnRecordingCrimson,
     tertiaryContainer = RecordingCrimsonContainer,
     onTertiaryContainer = OnRecordingCrimsonContainer,
     background = MidnightBg,
-    onBackground = Color(0xFFEAF2FF),
+    onBackground = Color(0xFFF6EEFF),
     surface = MidnightSurface,
-    onSurface = Color(0xFFEAF2FF),
+    onSurface = Color(0xFFF6EEFF),
     surfaceVariant = MidnightSurfaceVariant,
-    onSurfaceVariant = Color(0xFFAEC0DA),
-    outline = Color(0xFF364B6B)
+    onSurfaceVariant = Color(0xFFCDB8EB),
+    outline = Color(0xFF59388A)
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -43,14 +43,14 @@ private val LightColorScheme = lightColorScheme(
     tertiary = CrimsonTertiary,
     onTertiary = Color.White,
     tertiaryContainer = CrimsonTertiaryContainer,
-    onTertiaryContainer = Color(0xFF40000D),
+    onTertiaryContainer = Color(0xFF400018),
     background = SlateLightBg,
-    onBackground = Color(0xFF0E1826),
+    onBackground = Color(0xFF170B29),
     surface = SlateLightSurface,
-    onSurface = Color(0xFF0E1826),
+    onSurface = Color(0xFF170B29),
     surfaceVariant = SlateLightSurfaceVariant,
-    onSurfaceVariant = Color(0xFF44546A),
-    outline = Color(0xFFB5C4D8)
+    onSurfaceVariant = Color(0xFF4E386E),
+    outline = Color(0xFFC4ADE6)
 )
 
 val AppShapes = Shapes(
@@ -63,7 +63,7 @@ val AppShapes = Shapes(
 
 @Composable
 fun MyApplicationTheme(
-    darkTheme: Boolean = true, // Default to rich Studio Midnight dark theme for audio waveform clarity
+    darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme

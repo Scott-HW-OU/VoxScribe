@@ -109,7 +109,7 @@ fun ComplianceAndSettingsScreen(
                             )
                             Text(
                                 text = if (googleAccount.isSignedIn) {
-                                    "Signed in as ${googleAccount.displayName} (${googleAccount.email}) • Project: ${googleAccount.associatedProjectId}"
+                                    "Signed in as ${googleAccount.displayName} (${googleAccount.email})"
                                 } else {
                                     "Sign in with your Google Account to use your account's associated Google Gemini for AI transcription & summaries"
                                 },

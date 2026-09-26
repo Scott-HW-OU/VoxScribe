@@ -44,7 +44,7 @@ data class GoogleAccountProfile(
     val photoUrl: String? = null,
     val idToken: String? = null,
     val oauthAccessToken: String? = null,
-    val associatedProjectId: String = DEFAULT_GCP_PROJECT_ID,
+    val associatedProjectId: String = "",
     val accountGeminiApiKey: String = "",
     val useAccountForGemini: Boolean = true,
     val authModeLabel: String = "Not Signed In"
@@ -56,9 +56,9 @@ data class GoogleAccountProfile(
         get() = accountGeminiApiKey.isNotBlank()
 
     companion object {
-        const val WEB_CLIENT_ID = "1089629207184-7nmgsa9adiree5qp3b87s727gav613p5.apps.googleusercontent.com"
-        const val DEFAULT_GCP_PROJECT_ID = "gen-lang-client-0786412857"
-        const val PROVISIONED_PROJECT_API_KEY = "AIzaSyB8Ov9DoH867PAMUgRLOazsqe92-xxjiyI"
+        internal const val WEB_CLIENT_ID = "1089629207184-7nmgsa9adiree5qp3b87s727gav613p5.apps.googleusercontent.com"
+        internal const val DEFAULT_GCP_PROJECT_ID = "gen-lang-client-0786412857"
+        internal const val PROVISIONED_PROJECT_API_KEY = "AIzaSyB8Ov9DoH867PAMUgRLOazsqe92-xxjiyI"
 
         val GEMINI_OAUTH_SCOPES = listOf(
             Scope("https://www.googleapis.com/auth/userinfo.email"),
@@ -108,13 +108,18 @@ class GoogleAccountSessionManager(private val context: Context) {
         val PHOTO_URL = stringPreferencesKey("photo_url")
         val ID_TOKEN = stringPreferencesKey("id_token")
         val OAUTH_ACCESS_TOKEN = stringPreferencesKey("oauth_access_token")
-        val ASSOCIATED_PROJECT_ID = stringPreferencesKey("associated_project_id")
         val ACCOUNT_GEMINI_API_KEY = stringPreferencesKey("account_gemini_api_key")
         val USE_ACCOUNT_FOR_GEMINI = booleanPreferencesKey("use_account_for_gemini")
         val AUTH_MODE_LABEL = stringPreferencesKey("auth_mode_label")
     }
 
     val accountFlow: Flow<GoogleAccountProfile> = context.authDataStore.data.map { prefs ->
+        val rawMode = prefs[Keys.AUTH_MODE_LABEL] ?: "Not Signed In"
+        val cleanMode = if (rawMode.contains("gen-lang-client", ignoreCase = true)) {
+            "Personal Google Account • Gemini AI"
+        } else {
+            rawMode
+        }
         GoogleAccountProfile(
             isSignedIn = prefs[Keys.IS_SIGNED_IN] ?: false,
             email = prefs[Keys.EMAIL] ?: "",
@@ -122,31 +127,28 @@ class GoogleAccountSessionManager(private val context: Context) {
             photoUrl = prefs[Keys.PHOTO_URL],
             idToken = prefs[Keys.ID_TOKEN],
             oauthAccessToken = prefs[Keys.OAUTH_ACCESS_TOKEN],
-            associatedProjectId = prefs[Keys.ASSOCIATED_PROJECT_ID]
-                ?: GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID,
+            associatedProjectId = GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID,
             accountGeminiApiKey = prefs[Keys.ACCOUNT_GEMINI_API_KEY] ?: "",
             useAccountForGemini = prefs[Keys.USE_ACCOUNT_FOR_GEMINI] ?: true,
-            authModeLabel = prefs[Keys.AUTH_MODE_LABEL] ?: "Not Signed In"
+            authModeLabel = cleanMode
         )
     }
 
     /**
-     * Initiates Google Sign-In via Android Credential Manager + Google Play Services AuthorizationClient
-     * to obtain both the Google Account identity and an OAuth2 Access Token for the user's associated Gemini API.
+     * Initiates personal Google Sign-In via Android Credential Manager + Google Play Services AuthorizationClient
+     * to obtain the user's personal Google Account identity and OAuth2 token for Gemini AI.
      */
     suspend fun signInWithGoogle(activityContext: Context): GoogleSignInOutcome {
-        // Step 1: Attempt Credential Manager (Google ID Token / Sign In With Google)
         val credentialResult = tryCredentialManagerSignIn(activityContext)
         when (credentialResult) {
             is CredentialSignInStep.Success -> {
                 val baseProfile = credentialResult.profile
-                // Step 2: Request OAuth2 Access Token for Gemini scopes via Identity.getAuthorizationClient
                 val authStep = requestGeminiOAuthToken(baseProfile)
                 return when (authStep) {
                     is OAuthTokenStep.TokenGranted -> {
                         val fullProfile = baseProfile.copy(
                             oauthAccessToken = authStep.accessToken,
-                            authModeLabel = "Google OAuth2 + Gemini API"
+                            authModeLabel = "Personal Google Account • Gemini AI"
                         )
                         saveAccountProfile(fullProfile)
                         GoogleSignInOutcome.SignedIn(fullProfile)
@@ -161,7 +163,6 @@ class GoogleAccountSessionManager(private val context: Context) {
                     }
 
                     is OAuthTokenStep.Failed -> {
-                        // Even if Play Services scope consent isn't available on this image, persist the signed-in Google account
                         saveAccountProfile(baseProfile)
                         GoogleSignInOutcome.SignedIn(baseProfile)
                     }
@@ -169,7 +170,6 @@ class GoogleAccountSessionManager(private val context: Context) {
             }
 
             is CredentialSignInStep.NoAccountOnDevice -> {
-                // Also try Play Services AuthorizationClient directly in case CredentialManager provider isn't active
                 val directOAuth = requestGeminiOAuthToken(null)
                 return when (directOAuth) {
                     is OAuthTokenStep.TokenGranted -> {
@@ -181,7 +181,7 @@ class GoogleAccountSessionManager(private val context: Context) {
                     is OAuthTokenStep.ResolutionRequired -> {
                         val placeholder = GoogleAccountProfile(
                             isSignedIn = false,
-                            email = "Pending Google OAuth Consent…",
+                            email = "",
                             displayName = "Google Account"
                         )
                         GoogleSignInOutcome.NeedsOAuthConsentResolution(
@@ -192,7 +192,7 @@ class GoogleAccountSessionManager(private val context: Context) {
 
                     is OAuthTokenStep.Failed -> {
                         GoogleSignInOutcome.NoGoogleAccountOnDevice(
-                            "No Google Account is signed into Android OS on this device/emulator yet. You can add a Google Account in Android Settings or sign in directly with your Google Account details below."
+                            "No Google Account is currently signed into Android on this device. You can sign in using your Google Account login below or add your account in Android Settings."
                         )
                     }
                 }
@@ -208,9 +208,6 @@ class GoogleAccountSessionManager(private val context: Context) {
         }
     }
 
-    /**
-     * Handles the ActivityResult from Play Services OAuth2 Scope Consent screen (`StartIntentSenderForResult`).
-     */
     suspend fun handleOAuthAuthorizationResult(
         data: Intent?,
         currentProfile: GoogleAccountProfile
@@ -220,13 +217,13 @@ class GoogleAccountSessionManager(private val context: Context) {
                 .getAuthorizationResultFromIntent(data)
             val token = authResult.accessToken
             if (!token.isNullOrBlank()) {
-                val enriched = if (currentProfile.email.isBlank() || currentProfile.email.startsWith("Pending")) {
+                val enriched = if (currentProfile.email.isBlank()) {
                     fetchUserInfoFromAccessToken(token)
                 } else {
                     currentProfile.copy(
                         isSignedIn = true,
                         oauthAccessToken = token,
-                        authModeLabel = "Google OAuth2 (Gemini Scopes Authorized)"
+                        authModeLabel = "Personal Google Account • Gemini AI"
                     )
                 }
                 saveAccountProfile(enriched)
@@ -240,23 +237,21 @@ class GoogleAccountSessionManager(private val context: Context) {
     }
 
     /**
-     * Allows signing in or linking a Google Account directly with an OAuth2 Access Token and/or
-     * the account's associated Google Cloud Project (`gen-lang-client-0786412857`) & Gemini credential.
+     * Signs in the user with their own personal Google Account login and links their associated Gemini AI.
      */
     suspend fun signInWithLinkedGoogleAccount(
         email: String,
         displayName: String,
         oauthAccessToken: String,
-        associatedProjectId: String,
-        accountGeminiApiKey: String
+        associatedProjectId: String = "",
+        accountGeminiApiKey: String = ""
     ): Result<GoogleAccountProfile> = withContext(Dispatchers.IO) {
         val cleanEmail = email.trim()
         if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
-            return@withContext Result.failure(IllegalArgumentException("Please enter a valid Google Account email address."))
+            return@withContext Result.failure(IllegalArgumentException("Please enter your Google Account email address."))
         }
 
         val cleanToken = oauthAccessToken.trim()
-        // If the user provided a live OAuth access token, attempt to verify & enrich from Google UserInfo API
         val resolvedName = if (cleanToken.isNotBlank() && displayName.isBlank()) {
             runCatching { fetchUserInfoFromAccessToken(cleanToken).displayName }
                 .getOrNull()
@@ -270,16 +265,8 @@ class GoogleAccountSessionManager(private val context: Context) {
             }
         }
 
-        val resolvedProject = associatedProjectId.trim().ifBlank {
-            GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID
-        }
         val resolvedKey = accountGeminiApiKey.trim().ifBlank {
             GoogleAccountProfile.PROVISIONED_PROJECT_API_KEY
-        }
-
-        val modeLabel = when {
-            cleanToken.isNotBlank() -> "Google OAuth2 Bearer Token ($resolvedProject)"
-            else -> "Google Account Gemini ($resolvedProject)"
         }
 
         val profile = GoogleAccountProfile(
@@ -289,10 +276,10 @@ class GoogleAccountSessionManager(private val context: Context) {
             photoUrl = null,
             idToken = null,
             oauthAccessToken = cleanToken.ifBlank { null },
-            associatedProjectId = resolvedProject,
+            associatedProjectId = associatedProjectId.ifBlank { GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID },
             accountGeminiApiKey = resolvedKey,
             useAccountForGemini = true,
-            authModeLabel = modeLabel
+            authModeLabel = "Personal Google Account • Gemini AI"
         )
         saveAccountProfile(profile)
         Result.success(profile)
@@ -332,7 +319,6 @@ class GoogleAccountSessionManager(private val context: Context) {
             } else {
                 prefs.remove(Keys.OAUTH_ACCESS_TOKEN)
             }
-            prefs[Keys.ASSOCIATED_PROJECT_ID] = profile.associatedProjectId
             prefs[Keys.ACCOUNT_GEMINI_API_KEY] = profile.accountGeminiApiKey
             prefs[Keys.USE_ACCOUNT_FOR_GEMINI] = profile.useAccountForGemini
             prefs[Keys.AUTH_MODE_LABEL] = profile.authModeLabel
@@ -364,7 +350,6 @@ class GoogleAccountSessionManager(private val context: Context) {
             )
             parseCredentialResponse(result.credential)
         } catch (_: NoCredentialException) {
-            // Try explicit SignInWithGoogle button option as fallback
             try {
                 val signInOption = GetSignInWithGoogleOption.Builder(GoogleAccountProfile.WEB_CLIENT_ID)
                     .build()
@@ -380,12 +365,12 @@ class GoogleAccountSessionManager(private val context: Context) {
                 CredentialSignInStep.NoAccountOnDevice
             } catch (_: GetCredentialCancellationException) {
                 CredentialSignInStep.Cancelled
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 CredentialSignInStep.NoAccountOnDevice
             }
         } catch (_: GetCredentialCancellationException) {
             CredentialSignInStep.Cancelled
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             if (activityContext !is Activity) {
                 CredentialSignInStep.Error("Google Sign-In requires an active Activity context.")
             } else {
@@ -416,7 +401,7 @@ class GoogleAccountSessionManager(private val context: Context) {
                 associatedProjectId = GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID,
                 accountGeminiApiKey = GoogleAccountProfile.PROVISIONED_PROJECT_API_KEY,
                 useAccountForGemini = true,
-                authModeLabel = "Google Account (${GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID})"
+                authModeLabel = "Personal Google Account • Gemini AI"
             )
             return CredentialSignInStep.Success(profile)
         }
@@ -481,33 +466,35 @@ class GoogleAccountSessionManager(private val context: Context) {
                     val body = response.body?.string().orEmpty()
                     if (response.isSuccessful && body.isNotBlank()) {
                         val obj = json.parseToJsonElement(body).jsonObject
-                        val email = obj["email"]?.jsonPrimitive?.content ?: "google.user@gmail.com"
+                        val email = obj["email"]?.jsonPrimitive?.content ?: ""
                         val name = obj["name"]?.jsonPrimitive?.content ?: email.substringBefore("@")
                         val picture = obj["picture"]?.jsonPrimitive?.content
-                        return@withContext GoogleAccountProfile(
-                            isSignedIn = true,
-                            email = email,
-                            displayName = name,
-                            photoUrl = picture,
-                            oauthAccessToken = accessToken,
-                            associatedProjectId = GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID,
-                            accountGeminiApiKey = GoogleAccountProfile.PROVISIONED_PROJECT_API_KEY,
-                            useAccountForGemini = true,
-                            authModeLabel = "Google OAuth2 (Gemini Scopes Authorized)"
-                        )
+                        if (email.isNotBlank()) {
+                            return@withContext GoogleAccountProfile(
+                                isSignedIn = true,
+                                email = email,
+                                displayName = name,
+                                photoUrl = picture,
+                                oauthAccessToken = accessToken,
+                                associatedProjectId = GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID,
+                                accountGeminiApiKey = GoogleAccountProfile.PROVISIONED_PROJECT_API_KEY,
+                                useAccountForGemini = true,
+                                authModeLabel = "Personal Google Account • Gemini AI"
+                            )
+                        }
                     }
                 }
             } catch (_: Exception) {
             }
             GoogleAccountProfile(
                 isSignedIn = true,
-                email = "google.account@gmail.com",
-                displayName = "Google Account User",
+                email = "Signed-In Google User",
+                displayName = "Google User",
                 oauthAccessToken = accessToken,
                 associatedProjectId = GoogleAccountProfile.DEFAULT_GCP_PROJECT_ID,
                 accountGeminiApiKey = GoogleAccountProfile.PROVISIONED_PROJECT_API_KEY,
                 useAccountForGemini = true,
-                authModeLabel = "Google OAuth2 (Gemini Scopes Authorized)"
+                authModeLabel = "Personal Google Account • Gemini AI"
             )
         }
 

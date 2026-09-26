@@ -29,6 +29,12 @@ import com.example.data.remote.ExportResult
 import com.example.data.remote.ExportTargetApp
 import com.example.data.remote.GeminiCallAiService
 import com.example.data.remote.ProductivityExportManager
+import com.example.telephony.ActivePhoneCallInfo
+import com.example.telephony.CallAudioOutputRoute
+import com.example.telephony.PhoneCallStateBus
+import com.example.telephony.SystemCallLogEntry
+import com.example.telephony.SystemCallPhase
+import com.example.telephony.TelephonyCallMonitor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,16 +48,16 @@ import kotlinx.coroutines.launch
 
 enum class AppTab {
     CALLS,
+    DIALER,
     RECORD,
     TAGS_CLOUD,
     COMPLIANCE
 }
 
 data class RecorderFormState(
-    val contactName: String = "Elena Vance (VP Legal)",
-    val phoneNumber: String = "+1 (415) 890-4312",
-    val callDirection: String = "INCOMING",
-    val selectedScenario: String = "Sales & Contract Renewal",
+    val contactName: String = "",
+    val phoneNumber: String = "",
+    val callDirection: String = "OUTGOING",
     val liveTranscriptAndNotes: String = "",
     val summaryStyle: String = "Executive Brief",
     val summaryLength: SummaryLengthOption = SummaryLengthOption.MEDIUM,
@@ -60,6 +66,7 @@ data class RecorderFormState(
         SummaryFocusAspect.DECISIONS_MADE.id,
         SummaryFocusAspect.IMPORTANT_DATES.id
     ),
+    val autoRecordOnPhoneCallActive: Boolean = true,
     val showConsentDialog: Boolean = false,
     val hasPlayedAudibleAlertForSession: Boolean = false,
     val partyConsentConfirmed: Boolean = false,
@@ -99,7 +106,12 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
         appendSpokenMicLineToLiveTranscript(recognizedSentence)
     }
 
+    val telephonyMonitor = TelephonyCallMonitor(application) { newPhase, phone, contact, direction ->
+        handleSystemTelephonyTransition(newPhase, phone, contact, direction)
+    }
+
     private var liveAnalysisDebounceJob: Job? = null
+    private var wasRecordingTriggeredByPhoneCall = false
 
     private val _currentTab = MutableStateFlow(AppTab.CALLS)
     val currentTab: StateFlow<AppTab> = _currentTab.asStateFlow()
@@ -121,6 +133,15 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _exportConfig = MutableStateFlow(ExportConfiguratorState())
     val exportConfig: StateFlow<ExportConfiguratorState> = _exportConfig.asStateFlow()
+
+    private val _systemCallLog = MutableStateFlow<List<SystemCallLogEntry>>(emptyList())
+    val systemCallLog: StateFlow<List<SystemCallLogEntry>> = _systemCallLog.asStateFlow()
+
+    private val _isDefaultDialer = MutableStateFlow(false)
+    val isDefaultDialer: StateFlow<Boolean> = _isDefaultDialer.asStateFlow()
+
+    private val _isCallScreeningEnabled = MutableStateFlow(false)
+    val isCallScreeningEnabled: StateFlow<Boolean> = _isCallScreeningEnabled.asStateFlow()
 
     private val _showGoogleAccountSheet = MutableStateFlow(false)
     val showGoogleAccountSheet: StateFlow<Boolean> = _showGoogleAccountSheet.asStateFlow()
@@ -151,6 +172,8 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _isSyncingCloud = MutableStateFlow(false)
     val isSyncingCloud: StateFlow<Boolean> = _isSyncingCloud.asStateFlow()
+
+    val activePhoneCallInfo: StateFlow<ActivePhoneCallInfo> = PhoneCallStateBus.callInfo
 
     val googleAccount: StateFlow<GoogleAccountProfile> = googleAuthManager.accountFlow.stateIn(
         scope = viewModelScope,
@@ -223,7 +246,251 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
         initialValue = emptyList()
     )
 
-    fun isGeminiReady(): Boolean = repository.isGeminiAvailable(googleAccount.value)
+    init {
+        // 1. Delete any legacy example call recordings ("Elena Vance" etc.) on startup
+        viewModelScope.launch {
+            repository.purgeExampleRecordings()
+        }
+
+        // 2. Start real Android TelephonyManager & InCallService state monitoring
+        refreshTelephonyBindingsAndCallLog()
+
+        // 3. Observe InCallService / CallScreeningService state changes from PhoneCallStateBus
+        viewModelScope.launch {
+            PhoneCallStateBus.callInfo.collect { callInfo ->
+                if (callInfo.phoneNumber.isNotBlank() || callInfo.contactName.isNotBlank()) {
+                    _recorderForm.update { current ->
+                        current.copy(
+                            phoneNumber = callInfo.phoneNumber.ifBlank { current.phoneNumber },
+                            contactName = callInfo.contactName.ifBlank { current.contactName },
+                            callDirection = callInfo.callDirection
+                        )
+                    }
+                }
+
+                if (callInfo.phase == SystemCallPhase.ACTIVE_IN_CALL &&
+                    _recorderForm.value.autoRecordOnPhoneCallActive &&
+                    !audioRecorder.isRecording.value
+                ) {
+                    wasRecordingTriggeredByPhoneCall = true
+                    _currentTab.value = AppTab.RECORD
+                    startCallRecordingForActiveTelephonyCall()
+                } else if ((callInfo.phase == SystemCallPhase.DISCONNECTED || callInfo.phase == SystemCallPhase.IDLE) &&
+                    wasRecordingTriggeredByPhoneCall &&
+                    audioRecorder.isRecording.value
+                ) {
+                    wasRecordingTriggeredByPhoneCall = false
+                    stopRecordingAndTranscribe()
+                }
+            }
+        }
+    }
+
+    fun refreshTelephonyBindingsAndCallLog() {
+        telephonyMonitor.startMonitoring()
+        telephonyMonitor.refreshConnectedBluetoothDevices()
+        _isDefaultDialer.value = telephonyMonitor.isDefaultDialerApp()
+        _isCallScreeningEnabled.value = telephonyMonitor.isCallScreeningRoleHeld()
+        viewModelScope.launch {
+            _systemCallLog.value = telephonyMonitor.loadRecentSystemCallLog(limit = 12)
+        }
+    }
+
+    private fun handleSystemTelephonyTransition(
+        newPhase: SystemCallPhase,
+        phone: String,
+        contact: String,
+        direction: String
+    ) {
+        if (phone.isNotBlank() || contact.isNotBlank()) {
+            _recorderForm.update { current ->
+                current.copy(
+                    phoneNumber = phone.ifBlank { current.phoneNumber },
+                    contactName = contact.ifBlank { current.contactName },
+                    callDirection = direction.ifBlank { current.callDirection }
+                )
+            }
+        }
+
+        when (newPhase) {
+            SystemCallPhase.RINGING -> {
+                _currentTab.value = AppTab.RECORD
+                _snackbarMessage.value =
+                    "Incoming Phone Call detected (${phone.ifBlank { "Caller" }}) — Ready to record."
+            }
+            SystemCallPhase.ACTIVE_IN_CALL -> {
+                if (_recorderForm.value.autoRecordOnPhoneCallActive && !audioRecorder.isRecording.value) {
+                    wasRecordingTriggeredByPhoneCall = true
+                    _currentTab.value = AppTab.RECORD
+                    startCallRecordingForActiveTelephonyCall()
+                }
+            }
+            SystemCallPhase.IDLE, SystemCallPhase.DISCONNECTED -> {
+                if (wasRecordingTriggeredByPhoneCall && audioRecorder.isRecording.value) {
+                    wasRecordingTriggeredByPhoneCall = false
+                    stopRecordingAndTranscribe()
+                }
+                refreshTelephonyBindingsAndCallLog()
+            }
+            else -> {}
+        }
+    }
+
+    private fun startCallRecordingForActiveTelephonyCall() {
+        val currentSettings = settings.value
+        if (currentSettings.autoPlayAudibleTtsAlert) {
+            playComplianceNoticeNow {
+                beginActualRecording(audiblePlayed = true)
+            }
+        } else {
+            beginActualRecording(audiblePlayed = false)
+        }
+    }
+
+    // --- Real Phone Call Dialer, Keypad & Audio Output Routing Controls ---
+
+    fun pressKeypadDigit(digit: Char) {
+        telephonyMonitor.playKeypadDtmfTone(digit)
+        val nextPhone = _recorderForm.value.phoneNumber + digit
+        val lookedUp = telephonyMonitor.lookupContactName(nextPhone)
+        _recorderForm.update { current ->
+            current.copy(
+                phoneNumber = nextPhone,
+                contactName = lookedUp.ifBlank { current.contactName }
+            )
+        }
+    }
+
+    fun backspaceDialerNumber() {
+        val currentPhone = _recorderForm.value.phoneNumber
+        if (currentPhone.isEmpty()) return
+        val nextPhone = currentPhone.dropLast(1)
+        val lookedUp = telephonyMonitor.lookupContactName(nextPhone)
+        _recorderForm.update { current ->
+            current.copy(
+                phoneNumber = nextPhone,
+                contactName = if (nextPhone.isEmpty()) "" else lookedUp.ifBlank { current.contactName }
+            )
+        }
+    }
+
+    fun clearDialerNumber() {
+        _recorderForm.update {
+            it.copy(phoneNumber = "", contactName = "")
+        }
+    }
+
+    fun appendDialerPlusSign() {
+        telephonyMonitor.playKeypadDtmfTone('0')
+        val currentPhone = _recorderForm.value.phoneNumber
+        val nextPhone = if (currentPhone.isEmpty()) "+" else "$currentPhone+"
+        _recorderForm.update { it.copy(phoneNumber = nextPhone) }
+    }
+
+    fun selectCallAudioOutputRoute(route: CallAudioOutputRoute) {
+        val statusMsg = telephonyMonitor.setCallAudioOutputRoute(route)
+        _snackbarMessage.value = statusMsg
+    }
+
+    fun dialAndAutoRecordFromDialer() {
+        val targetNumber = _recorderForm.value.phoneNumber.trim()
+        if (targetNumber.isBlank()) {
+            _snackbarMessage.value = "Enter a phone number on the keypad to call & record."
+            return
+        }
+        _recorderForm.update { it.copy(autoRecordOnPhoneCallActive = true) }
+        dialAndRecordPhoneCall(targetNumber, _recorderForm.value.contactName)
+        _currentTab.value = AppTab.RECORD
+    }
+
+    fun dialAndRecordPhoneCall(phoneNumber: String, contactName: String) {
+        val targetNumber = phoneNumber.trim().ifBlank { _recorderForm.value.phoneNumber.trim() }
+        if (targetNumber.isBlank()) {
+            _snackbarMessage.value = "Please enter a phone number to place a call."
+            return
+        }
+        val resolvedContact = contactName.trim().ifBlank {
+            telephonyMonitor.lookupContactName(targetNumber)
+        }
+        _recorderForm.update {
+            it.copy(
+                phoneNumber = targetNumber,
+                contactName = resolvedContact.ifBlank { targetNumber },
+                callDirection = "OUTGOING"
+            )
+        }
+
+        val res = telephonyMonitor.placeRealPhoneCall(targetNumber)
+        res.fold(
+            onSuccess = { msg ->
+                _snackbarMessage.value = msg
+            },
+            onFailure = { err ->
+                _snackbarMessage.value = "Failed to place call: ${err.localizedMessage}"
+            }
+        )
+    }
+
+    fun answerIncomingSystemCall() {
+        val answered = telephonyMonitor.answerRingingCall()
+        if (answered) {
+            _snackbarMessage.value = "Answered incoming phone call."
+        } else {
+            _snackbarMessage.value = "Use system phone notification or grant Answer Phone Calls permission."
+        }
+    }
+
+    fun endActiveSystemCall() {
+        val ended = telephonyMonitor.endActiveCall()
+        if (audioRecorder.isRecording.value) {
+            wasRecordingTriggeredByPhoneCall = false
+            stopRecordingAndTranscribe()
+        } else if (ended) {
+            _snackbarMessage.value = "Phone call ended."
+        }
+    }
+
+    fun toggleCallHold() {
+        PhoneCallStateBus.toggleHoldTelecomCall()
+    }
+
+    fun toggleCallSpeakerphone() {
+        val currentRoute = activePhoneCallInfo.value.audioRoute
+        val nextRoute = if (currentRoute == CallAudioOutputRoute.LOUDSPEAKER) {
+            CallAudioOutputRoute.EARPIECE
+        } else {
+            CallAudioOutputRoute.LOUDSPEAKER
+        }
+        selectCallAudioOutputRoute(nextRoute)
+    }
+
+    fun toggleCallMute() {
+        val next = !activePhoneCallInfo.value.isMicrophoneMuted
+        telephonyMonitor.setMicrophoneMuted(next)
+    }
+
+    fun toggleAutoRecordOnPhoneCall(enabled: Boolean) {
+        _recorderForm.update { it.copy(autoRecordOnPhoneCallActive = enabled) }
+        _snackbarMessage.value = if (enabled) {
+            "Auto-record enabled: VoxScribe will automatically record when a phone call connects."
+        } else {
+            "Auto-record disabled: Tap 'Start Call Recording' manually during calls."
+        }
+    }
+
+    fun selectSystemCallLogEntry(entry: SystemCallLogEntry) {
+        _recorderForm.update {
+            it.copy(
+                phoneNumber = entry.phoneNumber,
+                contactName = entry.cachedName,
+                callDirection = if (entry.callType == "MISSED") "INCOMING" else entry.callType
+            )
+        }
+        _snackbarMessage.value = "Loaded ${entry.cachedName} (${entry.phoneNumber}) from device Call Log."
+    }
+
+    fun getRequestDefaultDialerIntent(): Intent? = telephonyMonitor.createRequestDialerRoleIntent()
+    fun getRequestCallScreeningIntent(): Intent? = telephonyMonitor.createRequestCallScreeningRoleIntent()
 
     // --- Google Account Sign-In & Associated Gemini Management ---
 
@@ -314,7 +581,7 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
                 onSuccess = { profile ->
                     _googleAuthHintMessage.value = null
                     _snackbarMessage.value =
-                        "Signed in with ${profile.email} — Using associated Google Gemini (${profile.associatedProjectId})!"
+                        "Signed in as ${profile.displayName} (${profile.email}) — Google Gemini AI active!"
                 },
                 onFailure = { err ->
                     _googleAuthHintMessage.value = err.localizedMessage
@@ -349,6 +616,9 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun selectTab(tab: AppTab) {
         _currentTab.value = tab
+        if (tab == AppTab.RECORD || tab == AppTab.DIALER) {
+            refreshTelephonyBindingsAndCallLog()
+        }
     }
 
     fun openCallDetail(callId: Long) {
@@ -383,15 +653,17 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun updatePhoneNumber(phone: String) {
-        _recorderForm.update { it.copy(phoneNumber = phone) }
+        val lookedUp = telephonyMonitor.lookupContactName(phone)
+        _recorderForm.update {
+            it.copy(
+                phoneNumber = phone,
+                contactName = if (it.contactName.isBlank() && lookedUp.isNotBlank()) lookedUp else it.contactName
+            )
+        }
     }
 
     fun updateCallDirection(direction: String) {
         _recorderForm.update { it.copy(callDirection = direction) }
-    }
-
-    fun updateSelectedScenario(scenario: String) {
-        _recorderForm.update { it.copy(selectedScenario = scenario) }
     }
 
     fun updateRecorderSummaryStyle(style: String) {
@@ -435,7 +707,7 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
         } else {
             liveSpeechTranscriber.startListening()
             _recorderForm.update { it.copy(liveSpeechRecognitionEnabled = true) }
-            _snackbarMessage.value = "Live microphone speech-to-text active."
+            _snackbarMessage.value = "Live microphone speech-to-text active for call."
         }
     }
 
@@ -443,24 +715,7 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
         val sec = audioRecorder.elapsedSeconds.value
         val timeTag = "[%02d:%02d]".format(sec / 60, sec % 60)
         val speakerName = googleAccount.value.takeIf { it.isSignedIn }?.displayName?.ifBlank { "You" } ?: "You"
-        val formattedLine = "$timeTag Speaker 1 ($speakerName): $sentence"
-        _recorderForm.update { current ->
-            val merged = if (current.liveTranscriptAndNotes.isBlank()) {
-                formattedLine
-            } else {
-                current.liveTranscriptAndNotes + "\n" + formattedLine
-            }
-            current.copy(liveTranscriptAndNotes = merged)
-        }
-        triggerLiveInCallAiUpdate()
-    }
-
-    fun addQuickLiveCallerUtterance(speaker: String, text: String) {
-        if (text.isBlank()) return
-        val sec = audioRecorder.elapsedSeconds.value
-        val timeTag = "[%02d:%02d]".format(sec / 60, sec % 60)
-        val formattedLine = "$timeTag $speaker: ${text.trim()}"
-        audioRecorder.injectSyntheticAmplitudePulse(0.75f)
+        val formattedLine = "$timeTag $speakerName: $sentence"
         _recorderForm.update { current ->
             val merged = if (current.liveTranscriptAndNotes.isBlank()) {
                 formattedLine
@@ -533,51 +788,29 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun beginActualRecording(audiblePlayed: Boolean) {
-        val result = audioRecorder.startRecording()
+        val routeSpeakerphone = settings.value.routeAlertToSpeakerphone
+        val result = audioRecorder.startRecording(routeSpeakerphoneForCallCapture = routeSpeakerphone)
         result.fold(
             onSuccess = {
+                liveSpeechTranscriber.startListening()
                 val accountBadge = googleAccount.value.takeIf { it.isSignedIn }?.email ?: "Default Gemini"
+                val audioSrc = audioRecorder.activeAudioSourceLabel.value
                 _recorderForm.update {
                     it.copy(
                         hasPlayedAudibleAlertForSession = audiblePlayed,
+                        liveSpeechRecognitionEnabled = true,
                         lastConsentTimestamp = System.currentTimeMillis(),
                         liveInCallInsight = LiveInCallInsight(
-                            rollingSummary = "Call recording started. Waiting for live speech or call dialogue to generate real-time Gemini takeaways…",
+                            rollingSummary = "Recording active on $audioSrc. Speak during the phone call to stream real-time transcription & Gemini AI takeaways…",
                             lastUpdatedSecond = 0,
                             poweredByAccount = accountBadge
                         )
                     )
                 }
-                _snackbarMessage.value = "Call recording started with verified privacy compliance."
+                _snackbarMessage.value = "Call recording active ($audioSrc)."
             },
             onFailure = { err ->
-                _snackbarMessage.value = "Could not start microphone recorder: ${err.localizedMessage}"
-            }
-        )
-    }
-
-    fun startSimulatedCallConversation() {
-        val form = _recorderForm.value
-        ttsAnnouncer.startSimulatedCallDialogue(
-            contactName = form.contactName,
-            scenarioTopic = form.selectedScenario,
-            onLineSpoken = { line, pulse ->
-                audioRecorder.injectSyntheticAmplitudePulse(pulse)
-                if (line.isNotEmpty()) {
-                    _recorderForm.update { current ->
-                        val updatedNotes = if (current.liveTranscriptAndNotes.isBlank()) {
-                            line
-                        } else {
-                            current.liveTranscriptAndNotes + "\n" + line
-                        }
-                        current.copy(liveTranscriptAndNotes = updatedNotes)
-                    }
-                    triggerLiveInCallAiUpdate()
-                }
-            },
-            onCompleted = {
-                triggerLiveInCallAiUpdate()
-                _snackbarMessage.value = "Live call dialogue finished. Tap 'Finish & Transcribe' to save."
+                _snackbarMessage.value = "Could not start call audio recorder: ${err.localizedMessage}"
             }
         )
     }
@@ -597,7 +830,7 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
             _recorderForm.update { it.copy(isUpdatingLiveInsight = true) }
             val insight = repository.analyzeLiveCallProgress(
                 partialTranscript = form.liveTranscriptAndNotes,
-                contactName = form.contactName,
+                contactName = form.contactName.ifBlank { form.phoneNumber.ifBlank { "Caller" } },
                 elapsedSeconds = audioRecorder.elapsedSeconds.value,
                 summaryLength = form.summaryLength,
                 focusAspects = form.selectedFocusAspects.toList(),
@@ -619,15 +852,24 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
         val durationSec = audioRecorder.elapsedSeconds.value.coerceAtLeast(1)
         val audioFile = audioRecorder.stopRecording()
         val form = _recorderForm.value
+        val callInfo = activePhoneCallInfo.value
         val currentSettings = settings.value
+
+        val finalPhone = form.phoneNumber.ifBlank { callInfo.phoneNumber.ifBlank { "Phone Call" } }
+        val finalContact = form.contactName.ifBlank {
+            callInfo.contactName.ifBlank {
+                telephonyMonitor.lookupContactName(finalPhone).ifBlank { finalPhone }
+            }
+        }
+        val finalDirection = form.callDirection.ifBlank { callInfo.callDirection }
 
         viewModelScope.launch {
             _recorderForm.update { it.copy(isAnalyzingWithAi = true, liveSpeechRecognitionEnabled = false) }
             try {
                 val saved = repository.processAndSaveCallRecording(
-                    contactName = form.contactName,
-                    phoneNumber = form.phoneNumber,
-                    callDirection = form.callDirection,
+                    contactName = finalContact,
+                    phoneNumber = finalPhone,
+                    callDirection = finalDirection,
                     durationSeconds = durationSec,
                     audioFile = audioFile,
                     consentJurisdiction = currentSettings.jurisdictionDisplayName,
@@ -968,6 +1210,7 @@ class VoxScribeViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         super.onCleared()
+        telephonyMonitor.stopMonitoring()
         audioPlayer.stopAndRelease()
         ttsAnnouncer.shutdown()
         liveSpeechTranscriber.stopListening()

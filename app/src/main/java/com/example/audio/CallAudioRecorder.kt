@@ -1,8 +1,10 @@
 package com.example.audio
 
 import android.content.Context
+import android.media.AudioManager
 import android.media.MediaRecorder
 import android.os.Build
+import com.example.telephony.PhoneCallStateBus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,33 +38,75 @@ class CallAudioRecorder(
     private val _waveformAmplitudes = MutableStateFlow(List(40) { 0.08f })
     val waveformAmplitudes: StateFlow<List<Float>> = _waveformAmplitudes.asStateFlow()
 
-    fun startRecording(): Result<File> {
+    private val _activeAudioSourceLabel = MutableStateFlow("VOICE_COMMUNICATION")
+    val activeAudioSourceLabel: StateFlow<String> = _activeAudioSourceLabel.asStateFlow()
+
+    /**
+     * Starts recording real call audio by routing `AudioManager` for call communication and
+     * attempting hardware telephony audio sources in priority order:
+     * `VOICE_CALL` -> `VOICE_COMMUNICATION` -> `VOICE_RECOGNITION` -> `MIC`.
+     */
+    fun startRecording(routeSpeakerphoneForCallCapture: Boolean = true): Result<File> {
         stopRecordingCleanup()
         return try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            runCatching {
+                audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
+                if (routeSpeakerphoneForCallCapture) {
+                    @Suppress("DEPRECATION")
+                    audioManager?.isSpeakerphoneOn = true
+                    PhoneCallStateBus.updateAudioState(isSpeakerphoneOn = true)
+                }
+            }
+
             val recordingsDir = File(context.filesDir, "recordings").apply { mkdirs() }
             val file = File(recordingsDir, "call_${System.currentTimeMillis()}.m4a")
             outputFile = file
 
-            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
+            val candidateSources = listOf(
+                MediaRecorder.AudioSource.VOICE_CALL to "VOICE_CALL (Direct Line)",
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION to "VOICE_COMMUNICATION (Telephony)",
+                MediaRecorder.AudioSource.VOICE_RECOGNITION to "VOICE_RECOGNITION (Clear Voice)",
+                MediaRecorder.AudioSource.MIC to "MIC (Acoustic Call Capture)"
+            )
+
+            var startedRecorder: MediaRecorder? = null
+            var chosenLabel = "VOICE_COMMUNICATION"
+            var lastError: Exception? = null
+
+            for ((sourceInt, label) in candidateSources) {
+                try {
+                    if (file.exists()) file.delete()
+                    val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        MediaRecorder(context)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        MediaRecorder()
+                    }
+                    recorder.apply {
+                        setAudioSource(sourceInt)
+                        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        setAudioSamplingRate(44100)
+                        setAudioEncodingBitRate(128000)
+                        setOutputFile(file.absolutePath)
+                        prepare()
+                        start()
+                    }
+                    startedRecorder = recorder
+                    chosenLabel = label
+                    break
+                } catch (e: Exception) {
+                    lastError = e
+                }
             }
 
-            recorder.apply {
-                // VOICE_RECOGNITION or MIC works reliably across Android 10-16 when Speakerphone is active
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioSamplingRate(44100)
-                setAudioEncodingBitRate(128000)
-                setOutputFile(file.absolutePath)
-                prepare()
-                start()
-            }
+            val activeRecorder = startedRecorder
+                ?: throw (lastError ?: IllegalStateException("Unable to initialize MediaRecorder for call capture."))
 
-            mediaRecorder = recorder
+            mediaRecorder = activeRecorder
+            _activeAudioSourceLabel.value = chosenLabel
+            PhoneCallStateBus.updateAudioState(audioSourceLabel = chosenLabel)
             _isRecording.value = true
             _isPaused.value = false
             _elapsedSeconds.value = 0
@@ -90,16 +134,6 @@ class CallAudioRecorder(
         }
     }
 
-    fun injectSyntheticAmplitudePulse(level: Float) {
-        val clamped = level.coerceIn(0.12f, 0.95f)
-        val current = _waveformAmplitudes.value.toMutableList()
-        if (current.isNotEmpty()) {
-            current.removeAt(0)
-        }
-        current.add(clamped)
-        _waveformAmplitudes.value = current
-    }
-
     fun stopRecording(): File? {
         val recordedFile = outputFile
         monitorJob?.cancel()
@@ -110,7 +144,6 @@ class CallAudioRecorder(
                 release()
             }
         } catch (_: Exception) {
-            // If MediaRecorder fails to stop cleanly (e.g., very short duration or virtual mic), keep file reference
         } finally {
             mediaRecorder = null
             _isRecording.value = false
@@ -141,8 +174,8 @@ class CallAudioRecorder(
                     }
 
                     val rawAmp = runCatching { mediaRecorder?.maxAmplitude ?: 0 }.getOrDefault(0)
-                    val normalized = if (rawAmp > 50) {
-                        min(1.0f, max(0.12f, rawAmp / 18000f))
+                    val normalized = if (rawAmp > 40) {
+                        min(1.0f, max(0.12f, rawAmp / 16000f))
                     } else {
                         0.08f
                     }

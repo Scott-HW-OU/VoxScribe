@@ -2,45 +2,59 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Dark Theme Palette - Studio Midnight & Electric Cyan / Amber
-val MidnightBg = Color(0xFF09111E)
-val MidnightSurface = Color(0xFF101C2E)
-val MidnightSurfaceVariant = Color(0xFF1A2B44)
-val MidnightCardElevated = Color(0xFF152338)
+// Dark Theme Palette - Cyber Obsidian with Neon Purple & Neon Green
+val MidnightBg = Color(0xFF0A0614)
+val MidnightSurface = Color(0xFF140C26)
+val MidnightSurfaceVariant = Color(0xFF22143D)
+val MidnightCardElevated = Color(0xFF1B0F31)
 
-val ElectricCyan = Color(0xFF26E6FF)
-val ElectricCyanContainer = Color(0xFF004E5B)
-val OnElectricCyan = Color(0xFF00262D)
-val OnElectricCyanContainer = Color(0xFFB4F4FF)
+val NeonPurple = Color(0xFFC84BFF)
+val NeonPurpleBright = Color(0xFFDF80FF)
+val NeonPurpleContainer = Color(0xFF3F0D63)
+val OnNeonPurple = Color(0xFF140024)
+val OnNeonPurpleContainer = Color(0xFFF5D9FF)
 
-val ComplianceAmber = Color(0xFFFFB72B)
-val ComplianceAmberContainer = Color(0xFF4D3200)
-val OnComplianceAmber = Color(0xFF2B1B00)
-val OnComplianceAmberContainer = Color(0xFFFFDFAA)
+val NeonGreen = Color(0xFF2BFF88)
+val NeonGreenLime = Color(0xFF6BFF38)
+val NeonGreenContainer = Color(0xFF00451D)
+val OnNeonGreen = Color(0xFF00210B)
+val OnNeonGreenContainer = Color(0xFFC2FFDA)
 
-val RecordingCrimson = Color(0xFFFF4D6D)
-val RecordingCrimsonContainer = Color(0xFF590D22)
+// Semantic aliases mapped to Neon Purple & Neon Green palette across all screens
+val ElectricCyan = NeonPurple
+val ElectricCyanContainer = NeonPurpleContainer
+val OnElectricCyan = OnNeonPurple
+val OnElectricCyanContainer = OnNeonPurpleContainer
+
+val EmeraldSynced = NeonGreen
+
+val ComplianceAmber = NeonGreenLime
+val ComplianceAmberContainer = NeonGreenContainer
+val OnComplianceAmber = OnNeonGreen
+val OnComplianceAmberContainer = OnNeonGreenContainer
+
+val RecordingCrimson = Color(0xFFFF2E93)
+val RecordingCrimsonContainer = Color(0xFF59002C)
 val OnRecordingCrimson = Color(0xFFFFFFFF)
-val OnRecordingCrimsonContainer = Color(0xFFFFCCD5)
+val OnRecordingCrimsonContainer = Color(0xFFFFD1E6)
 
-val EmeraldSynced = Color(0xFF10B981)
-val NotionSlate = Color(0xFF2F3437)
-val EvernoteGreen = Color(0xFF00A82D)
+val NotionSlate = Color(0xFF2E1C44)
+val EvernoteGreen = NeonGreen
 
-// Light Theme Palette - Crisp Architectural Slate & Deep Teal
-val SlateLightBg = Color(0xFFF5F8FC)
+// Light Theme Palette - Crisp Neon Violet & Neon Emerald
+val SlateLightBg = Color(0xFFF9F5FF)
 val SlateLightSurface = Color(0xFFFFFFFF)
-val SlateLightSurfaceVariant = Color(0xFFE5ECF6)
+val SlateLightSurfaceVariant = Color(0xFFEDE2FF)
 
-val DeepTealPrimary = Color(0xFF006778)
-val DeepTealContainer = Color(0xFFB8EAFF)
+val DeepTealPrimary = Color(0xFF7B1FA2)
+val DeepTealContainer = Color(0xFFF3D9FF)
 val OnDeepTealPrimary = Color(0xFFFFFFFF)
-val OnDeepTealContainer = Color(0xFF001F26)
+val OnDeepTealContainer = Color(0xFF2A0040)
 
-val WarmAmberSecondary = Color(0xFF8A5100)
-val WarmAmberContainer = Color(0xFFFFDCBE)
+val WarmAmberSecondary = Color(0xFF008744)
+val WarmAmberContainer = Color(0xFFB8FFD4)
 val OnWarmAmberSecondary = Color(0xFFFFFFFF)
-val OnWarmAmberContainer = Color(0xFF2C1600)
+val OnWarmAmberContainer = Color(0xFF002911)
 
-val CrimsonTertiary = Color(0xFFB81D3E)
-val CrimsonTertiaryContainer = Color(0xFFFFD9DE)
+val CrimsonTertiary = Color(0xFFC2185B)
+val CrimsonTertiaryContainer = Color(0xFFFFD9E3)

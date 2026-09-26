@@ -316,4 +316,8 @@ class CallRecordingRepository(
         }
         dao.deleteRecordingById(recording.id)
     }
+
+    suspend fun purgeExampleRecordings() {
+        dao.deleteLegacyExampleRecordings()
+    }
 }
